@@ -1,0 +1,29 @@
+# .NET
+bin/
+obj/
+*.user
+publish/
+publish-aot/
+
+# Node
+node_modules/
+dist/
+
+# Paquete del visor: se publica en Releases, no en el repositorio
+dist-visor/
+SoporteLAN-Visor.zip
+
+# Archivos listos para adjuntar a un Release
+release/
+
+# Artefactos de prueba
+*.bmp
+
+# Datos locales del agente
+*.pfx
+*.log
+
+# Editores
+.vs/
+.vscode/
+.idea/

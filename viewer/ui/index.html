@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Soporte LAN</title>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="logo">SL</div>
+          <div class="brand-text">
+            <h1>Soporte LAN</h1>
+            <span id="bridge-status" class="status">conectando…</span>
+          </div>
+        </div>
+
+        <section class="section">
+          <h2>Equipos detectados</h2>
+          <ul id="devices" class="devices">
+            <li class="empty">Buscando en la red…</li>
+          </ul>
+        </section>
+
+        <section class="section">
+          <h2>Conexión manual</h2>
+          <label>
+            <span>IP</span>
+            <input id="ip" placeholder="192.168.1.50" autocomplete="off" spellcheck="false" />
+          </label>
+          <label>
+            <span>Puerto</span>
+            <input id="port" value="50000" inputmode="numeric" />
+          </label>
+          <label>
+            <span>PIN</span>
+            <input id="pin" placeholder="000000" inputmode="numeric" maxlength="12" autocomplete="off" />
+          </label>
+          <button id="connect" class="primary">Conectar</button>
+        </section>
+
+        <div id="log" class="log"></div>
+      </aside>
+
+      <main id="stage" class="stage">
+        <div id="placeholder" class="placeholder">
+          <h2>Sin sesión</h2>
+          <p>Elige un equipo de la lista o escribe su IP y el PIN que aparece en su pantalla.</p>
+        </div>
+
+        <canvas id="screen" class="screen hidden" tabindex="0"></canvas>
+        <div id="cursor" class="cursor hidden"></div>
+
+        <div class="toolbar hidden" id="toolbar">
+          <span id="session-label"></span>
+          <button id="fullscreen">Pantalla completa</button>
+          <button id="disconnect">Desconectar</button>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

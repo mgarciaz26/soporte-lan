@@ -8,7 +8,16 @@ interface Device {
   port: number;
   fp: string;
   os: string;
+  monitors: number;
   lastSeen: number;
+}
+
+interface RemoteMonitor {
+  primary: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 function element<T extends HTMLElement>(id: string): T {
@@ -30,6 +39,7 @@ const canvas = element<HTMLCanvasElement>('screen');
 const cursorElement = element<HTMLDivElement>('cursor');
 const toolbar = element<HTMLDivElement>('toolbar');
 const sessionLabel = element<HTMLSpanElement>('session-label');
+const monitorSelect = element<HTMLSelectElement>('monitor');
 const disconnectButton = element<HTMLButtonElement>('disconnect');
 const fullscreenButton = element<HTMLButtonElement>('fullscreen');
 
@@ -49,7 +59,14 @@ let reader = new MessageReader();
 let ready = false;
 let selected: Device | null = null;
 let currentIp = '';
-let screen = { width: 0, height: 0, originX: 0, originY: 0 };
+let screen = {
+  width: 0,
+  height: 0,
+  originX: 0,
+  originY: 0,
+  selected: 255,
+  monitors: [] as RemoteMonitor[],
+};
 let renderChain: Promise<void> = Promise.resolve();
 const pressedKeys = new Set<number>();
 const imageCache = new Map<string, ImageData>();
@@ -135,11 +152,71 @@ function resetSession(): void {
   placeholder.classList.remove('hidden');
   placeholder.querySelector('h2')!.textContent = 'Sin sesión';
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  screen = { width: 0, height: 0, originX: 0, originY: 0, selected: 255, monitors: [] };
+  monitorSelect.replaceChildren();
+  monitorSelect.classList.add('hidden');
 }
 
 function setBridgeStatus(text: string, state: 'online' | 'offline'): void {
   bridgeStatus.textContent = text;
   bridgeStatus.className = `status ${state}`;
+}
+
+// ---------------------------------------------------------------------------
+// Monitores
+// ---------------------------------------------------------------------------
+
+function monitorBounds(): { width: number; height: number } {
+  if (screen.monitors.length === 0) return { width: screen.width, height: screen.height };
+
+  let left = Infinity;
+  let top = Infinity;
+  let right = 0;
+  let bottom = 0;
+
+  for (const monitor of screen.monitors) {
+    left = Math.min(left, monitor.x);
+    top = Math.min(top, monitor.y);
+    right = Math.max(right, monitor.x + monitor.width);
+    bottom = Math.max(bottom, monitor.y + monitor.height);
+  }
+
+  return { width: right - left, height: bottom - top };
+}
+
+function renderMonitors(): void {
+  monitorSelect.replaceChildren();
+
+  if (screen.monitors.length <= 1) {
+    monitorSelect.classList.add('hidden');
+    return;
+  }
+
+  const bounds = monitorBounds();
+
+  const all = document.createElement('option');
+  all.value = '255';
+  all.textContent = `Todas · ${bounds.width}×${bounds.height}`;
+  monitorSelect.append(all);
+
+  screen.monitors.forEach((monitor, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent =
+      `Pantalla ${index + 1} · ${monitor.width}×${monitor.height}` +
+      (monitor.primary ? ' · principal' : '');
+    monitorSelect.append(option);
+  });
+
+  monitorSelect.value = String(screen.selected);
+  monitorSelect.classList.remove('hidden');
+}
+
+function updateSessionLabel(): void {
+  const count = screen.monitors.length;
+  sessionLabel.textContent =
+    count > 0 ? `${currentIp} · ${count} ${count === 1 ? 'pantalla' : 'pantallas'}` : currentIp;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +245,9 @@ function renderDevices(devices: Device[]): void {
 
     const meta = document.createElement('div');
     meta.className = 'device-meta';
-    meta.textContent = `${device.ip} · ${device.os || 'Windows'}`;
+    const monitors = device.monitors || 1;
+    const screens = monitors > 1 ? ` · ${monitors} pantallas` : '';
+    meta.textContent = `${device.ip}${screens} · ${device.os || 'Windows'}`;
 
     item.append(name, meta);
     item.addEventListener('click', () => selectDevice(device));
@@ -198,17 +277,45 @@ function handleMessage(message: Message): void {
   switch (message.type) {
     case MsgType.ScreenInfo: {
       const view = new DataView(message.payload.buffer, message.payload.byteOffset, message.payload.byteLength);
+      const monitors: RemoteMonitor[] = [];
+      let selected = 255;
+
+      // A partir de la v1.1 el payload incluye la lista de monitores.
+      if (message.payload.byteLength >= 12) {
+        selected = view.getUint8(10);
+        const count = view.getUint8(11);
+        let offset = 12;
+
+        for (let index = 0; index < count && offset + 9 <= message.payload.byteLength; index++) {
+          monitors.push({
+            primary: (message.payload[offset] & 1) !== 0,
+            x: view.getInt16(offset + 1, true),
+            y: view.getInt16(offset + 3, true),
+            width: view.getUint16(offset + 5, true),
+            height: view.getUint16(offset + 7, true),
+          });
+
+          offset += 9;
+        }
+      }
+
       screen = {
         width: view.getUint16(0, true),
         height: view.getUint16(2, true),
         originX: view.getInt16(6, true),
         originY: view.getInt16(8, true),
+        selected,
+        monitors,
       };
 
       canvas.width = screen.width;
       canvas.height = screen.height;
       ctx.imageSmoothingEnabled = false;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      cursorElement.classList.add('hidden');
+
+      renderMonitors();
+      updateSessionLabel();
       break;
     }
 
@@ -218,6 +325,11 @@ function handleMessage(message: Message): void {
 
     case MsgType.Cursor: {
       if (message.payload.length < 5) return;
+      if (message.payload[4] !== 1) {
+        cursorElement.classList.add('hidden');
+        return;
+      }
+
       const view = new DataView(message.payload.buffer, message.payload.byteOffset, message.payload.byteLength);
       positionCursor(view.getInt16(0, true), view.getInt16(2, true));
       break;
@@ -466,6 +578,12 @@ disconnectButton.addEventListener('click', () => {
 fullscreenButton.addEventListener('click', () => {
   if (document.fullscreenElement) void document.exitFullscreen();
   else void stage.requestFullscreen();
+});
+
+monitorSelect.addEventListener('change', () => {
+  const value = Number(monitorSelect.value);
+  send(MsgType.SelectMonitor, new Uint8Array([value]));
+  log(value === 255 ? 'Mostrando todas las pantallas…' : `Mostrando la pantalla ${value + 1}…`);
 });
 
 connectBridge();

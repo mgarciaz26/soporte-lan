@@ -6,6 +6,7 @@ export interface Device {
   port: number;
   fp: string;
   os: string;
+  monitors: number;
   lastSeen: number;
 }
 
@@ -33,6 +34,7 @@ export class Discovery {
           port: Number(data.port) || 50000,
           fp: String(data.fp ?? ''),
           os: String(data.os ?? ''),
+          monitors: Number(data.monitors) || 1,
           lastSeen: Date.now(),
         });
 

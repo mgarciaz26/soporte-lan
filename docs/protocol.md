@@ -16,7 +16,7 @@ El payload máximo aceptado es de 32 MiB.
 |--------|--------|-----------|---------|
 | 0x01 | `AUTH_REQUEST` | visor → agente | PIN en texto (6 dígitos) |
 | 0x02 | `AUTH_RESULT` | agente → visor | `[u8 ok][mensaje utf8]` |
-| 0x03 | `SCREEN_INFO` | agente → visor | `[u16 width][u16 height][u16 tileSize][i16 originX][i16 originY]` |
+| 0x03 | `SCREEN_INFO` | agente → visor | `[u16 width][u16 height][u16 tileSize][i16 originX][i16 originY][u8 selected][u8 count]` + `count × [u8 flags][i16 x][i16 y][u16 w][u16 h]` |
 | 0x04 | `FRAME` | agente → visor | deflate (ver abajo) |
 | 0x05 | `CURSOR` | agente → visor | `[i16 x][i16 y][u8 visible]` (relativo al origen) |
 | 0x10 | `MOUSE_MOVE` | visor → agente | `[i32 x][i32 y]` (coordenadas absolutas de pantalla virtual) |
@@ -24,8 +24,29 @@ El payload máximo aceptado es de 32 MiB.
 | 0x12 | `MOUSE_WHEEL` | visor → agente | `[i16 delta]` (múltiplos de 120) |
 | 0x13 | `KEY` | visor → agente | `[u16 virtualKey][u8 down]` |
 | 0x14 | `CLIPBOARD` | ambos | texto utf8 (reservado, v2) |
+| 0x15 | `SELECT_MONITOR` | visor → agente | `[u8 índice]` (`0xFF` = todas las pantallas) |
 | 0x20 | `PING` | ambos | vacío |
 | 0x21 | `PONG` | ambos | vacío |
+
+## SCREEN_INFO y monitores
+
+`width`, `height`, `originX` y `originY` describen **la región que se está
+capturando**: todo el escritorio virtual o un solo monitor.
+
+- `selected` es el índice del monitor activo, o `0xFF` si se ven todos.
+- `count` indica cuántos monitores hay. Cada uno ocupa 9 bytes:
+  `[u8 flags][i16 x][i16 y][u16 width][u16 height]`, con `flags` bit 0 =
+  monitor principal.
+- Los monitores se ordenan de izquierda a derecha (y de arriba abajo), así que
+  el índice 0 es el de la izquierda.
+- Al recibir `SELECT_MONITOR`, el agente cambia la región, responde con un
+  `SCREEN_INFO` nuevo y envía un **keyframe completo** de esa pantalla.
+- Si el monitor seleccionado desaparece, el agente vuelve a `0xFF` (todas).
+
+La entrada sigue usando coordenadas absolutas del escritorio virtual: el visor
+suma `originX`/`originY` a la posición del clic, así que cambiar de monitor no
+afecta al ratón ni al teclado.
+
 
 ## FRAME
 
@@ -62,8 +83,11 @@ El agente envía por UDP al puerto **47820** (broadcast dirigido a cada
 interfaz y a 255.255.255.255) cada 5 segundos:
 
 ```json
-{"app":"soporte-lan","v":1,"name":"PC-01","port":50000,"fp":"A1B2...","os":"Windows 10"}
+{"app":"soporte-lan","v":1,"name":"PC-01","port":50000,"fp":"A1B2...","os":"Windows 10","monitors":2}
 ```
+
+`monitors` es cuántas pantallas tiene el equipo (el visor lo muestra en la
+lista de equipos).
 
 `fp` es la huella SHA-256 del certificado en hexadecimal mayúsculas, sin
 dos puntos.

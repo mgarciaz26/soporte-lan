@@ -328,6 +328,23 @@ button.primary:hover {
   font-size: 12px;
 }
 
+.toolbar select {
+  max-width: 230px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+.toolbar select:focus {
+  border-color: var(--blue);
+}
+
 .hidden {
   display: none !important;
 }

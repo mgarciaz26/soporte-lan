@@ -15,6 +15,7 @@ internal enum MsgType : byte
     MouseWheel = 0x12,
     Key = 0x13,
     Clipboard = 0x14,
+    SelectMonitor = 0x15,
 
     Ping = 0x20,
     Pong = 0x21,

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
+using SoporteLan.Agent.Capture;
 
 namespace SoporteLan.Agent.Discovery;
 
@@ -65,9 +66,11 @@ internal sealed class Beacon : IDisposable
     {
         var name = Escape(Environment.MachineName);
         var os = Escape(Environment.OSVersion.VersionString);
+        var monitors = MonitorLayout.Enumerate().Length;
 
         return $"{{\"app\":\"soporte-lan\",\"v\":1,\"name\":\"{name}\"," +
-               $"\"port\":{_options.Port},\"fp\":\"{_fingerprint}\",\"os\":\"{os}\"}}";
+               $"\"port\":{_options.Port},\"fp\":\"{_fingerprint}\",\"os\":\"{os}\"," +
+               $"\"monitors\":{monitors}}}";
     }
 
     private static string Escape(string value) =>

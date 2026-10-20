@@ -113,7 +113,7 @@ await send('Runtime.evaluate', {
 
     const meta = document.createElement('div');
     meta.className = 'device-meta';
-    meta.textContent = '192.168.1.42 · Windows 11 Pro 24H2';
+    meta.textContent = '192.168.1.42 · 2 pantallas · Windows 11 Pro 24H2';
 
     item.append(name, meta);
     list.replaceChildren(item);

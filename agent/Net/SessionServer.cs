@@ -22,6 +22,9 @@ internal sealed class SessionServer
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly ConcurrentDictionary<string, Attempt> _attempts = new(StringComparer.Ordinal);
 
+    // -1 = escritorio completo. Lo escribe el bucle de entrada y lo aplica el de captura.
+    private int _requestedMonitor = -1;
+
     public SessionServer(AppOptions options, X509Certificate2 certificate, PinManager pin)
     {
         _options = options;
@@ -149,6 +152,12 @@ internal sealed class SessionServer
     private async Task RunSessionAsync(SslStream ssl, string remote, CancellationToken outer)
     {
         using var capturer = new ScreenCapturer();
+        Volatile.Write(ref _requestedMonitor, -1);
+
+        var monitors = MonitorLayout.Enumerate();
+        var bounds = MonitorLayout.Bounds(monitors);
+        capturer.SetRegion(bounds.X, bounds.Y, bounds.Width, bounds.Height);
+
         if (!capturer.Refresh())
         {
             await SendAsync(ssl, MsgType.AuthResult, Result(false, "no se pudo capturar la pantalla"), outer)
@@ -156,17 +165,10 @@ internal sealed class SessionServer
             return;
         }
 
-        var screenInfo = new byte[10];
-        BinaryPrimitives.WriteUInt16LittleEndian(screenInfo, (ushort)capturer.Width);
-        BinaryPrimitives.WriteUInt16LittleEndian(screenInfo.AsSpan(2), (ushort)capturer.Height);
-        BinaryPrimitives.WriteUInt16LittleEndian(screenInfo.AsSpan(4), (ushort)_options.TileSize);
-        BinaryPrimitives.WriteInt16LittleEndian(screenInfo.AsSpan(6), (short)capturer.OriginX);
-        BinaryPrimitives.WriteInt16LittleEndian(screenInfo.AsSpan(8), (short)capturer.OriginY);
-
         await SendAsync(ssl, MsgType.AuthResult, Result(true, "ok"), outer).ConfigureAwait(false);
-        await SendAsync(ssl, MsgType.ScreenInfo, screenInfo, outer).ConfigureAwait(false);
 
-        Log?.Invoke($"{remote}: sesión iniciada.");
+        Log?.Invoke($"{remote}: sesión iniciada ({monitors.Length} " +
+                    $"{(monitors.Length == 1 ? "pantalla" : "pantallas")}).");
         HasActiveSession = true;
         CurrentRemote = remote;
         SessionStarted?.Invoke(remote);
@@ -176,7 +178,7 @@ internal sealed class SessionServer
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(outer);
             var builder = new FrameBuilder(_options.TileSize);
 
-            var captureLoop = CaptureLoopAsync(ssl, capturer, builder, linked.Token);
+            var captureLoop = CaptureLoopAsync(ssl, capturer, builder, monitors, linked.Token);
             var inputLoop = InputLoopAsync(ssl, linked.Token);
 
             await Task.WhenAny(captureLoop, inputLoop).ConfigureAwait(false);
@@ -195,17 +197,61 @@ internal sealed class SessionServer
     }
 
     private async Task CaptureLoopAsync(
-        SslStream ssl, ScreenCapturer capturer, FrameBuilder builder, CancellationToken ct)
+        SslStream ssl,
+        ScreenCapturer capturer,
+        FrameBuilder builder,
+        DisplayMonitor[] monitors,
+        CancellationToken ct)
     {
         var frameDelay = TimeSpan.FromMilliseconds(Math.Max(1, 1000 / _options.Fps));
+        var applied = int.MinValue;
+        var lastScan = DateTime.MinValue;
         var lastCursorX = int.MinValue;
         var lastCursorY = int.MinValue;
+        var cursorVisible = false;
 
         while (!ct.IsCancellationRequested)
         {
+            var requested = Volatile.Read(ref _requestedMonitor);
+            var now = DateTime.UtcNow;
+
+            // Las pantallas pueden cambiar (conectar/desconectar un monitor o
+            // cambiar la resolución): se revisa una vez por segundo.
+            if (requested != applied || now - lastScan >= TimeSpan.FromSeconds(1))
+            {
+                var fresh = MonitorLayout.Enumerate();
+                lastScan = now;
+
+                if (requested != applied || !SameLayout(monitors, fresh))
+                {
+                    monitors = fresh;
+
+                    if (requested < -1 || requested >= monitors.Length)
+                    {
+                        requested = -1;
+                        Volatile.Write(ref _requestedMonitor, -1);
+                    }
+
+                    applied = requested;
+
+                    var bounds = requested >= 0 ? monitors[requested] : MonitorLayout.Bounds(monitors);
+                    capturer.SetRegion(bounds.X, bounds.Y, bounds.Width, bounds.Height);
+
+                    if (!capturer.Refresh())
+                    {
+                        await Task.Delay(500, ct).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    // Al cambiar de región hay que reenviar la pantalla completa.
+                    builder.Reset();
+                    await SendScreenInfoAsync(ssl, capturer, monitors, requested, ct).ConfigureAwait(false);
+                }
+            }
+
             if (!capturer.Refresh())
             {
-                await Task.Delay(500, ct).ConfigureAwait(false);
+                await Task.Delay(200, ct).ConfigureAwait(false);
                 continue;
             }
 
@@ -223,22 +269,73 @@ internal sealed class SessionServer
                 await SendAsync(ssl, MsgType.Frame, buffer, ct).ConfigureAwait(false);
             }
 
-            if (InputInjector.TryGetCursor(out var cursorX, out var cursorY) &&
-                (cursorX != lastCursorX || cursorY != lastCursorY))
+            if (InputInjector.TryGetCursor(out var cursorX, out var cursorY))
             {
-                lastCursorX = cursorX;
-                lastCursorY = cursorY;
+                var inside =
+                    cursorX >= capturer.OriginX && cursorX < capturer.OriginX + capturer.Width &&
+                    cursorY >= capturer.OriginY && cursorY < capturer.OriginY + capturer.Height;
 
-                var cursor = new byte[5];
-                BinaryPrimitives.WriteInt16LittleEndian(cursor, (short)(cursorX - capturer.OriginX));
-                BinaryPrimitives.WriteInt16LittleEndian(cursor.AsSpan(2), (short)(cursorY - capturer.OriginY));
-                cursor[4] = 1;
+                if (cursorX != lastCursorX || cursorY != lastCursorY || inside != cursorVisible)
+                {
+                    lastCursorX = cursorX;
+                    lastCursorY = cursorY;
+                    cursorVisible = inside;
 
-                await SendAsync(ssl, MsgType.Cursor, cursor, ct).ConfigureAwait(false);
+                    var cursor = new byte[5];
+                    if (inside)
+                    {
+                        BinaryPrimitives.WriteInt16LittleEndian(cursor, (short)(cursorX - capturer.OriginX));
+                        BinaryPrimitives.WriteInt16LittleEndian(cursor.AsSpan(2), (short)(cursorY - capturer.OriginY));
+                    }
+
+                    cursor[4] = inside ? (byte)1 : (byte)0;
+                    await SendAsync(ssl, MsgType.Cursor, cursor, ct).ConfigureAwait(false);
+                }
             }
 
             await Task.Delay(frameDelay, ct).ConfigureAwait(false);
         }
+    }
+
+    private async Task SendScreenInfoAsync(
+        Stream ssl, ScreenCapturer capturer, DisplayMonitor[] monitors, int selected, CancellationToken ct)
+    {
+        var payload = new byte[12 + monitors.Length * 9];
+        var span = payload.AsSpan();
+
+        BinaryPrimitives.WriteUInt16LittleEndian(span, (ushort)capturer.Width);
+        BinaryPrimitives.WriteUInt16LittleEndian(span[2..], (ushort)capturer.Height);
+        BinaryPrimitives.WriteUInt16LittleEndian(span[4..], (ushort)_options.TileSize);
+        BinaryPrimitives.WriteInt16LittleEndian(span[6..], (short)capturer.OriginX);
+        BinaryPrimitives.WriteInt16LittleEndian(span[8..], (short)capturer.OriginY);
+
+        payload[10] = selected < 0 ? (byte)0xFF : (byte)selected;
+        payload[11] = (byte)Math.Min(monitors.Length, 255);
+
+        var offset = 12;
+        foreach (var monitor in monitors)
+        {
+            payload[offset] = monitor.Primary ? (byte)1 : (byte)0;
+            BinaryPrimitives.WriteInt16LittleEndian(span[(offset + 1)..], (short)monitor.X);
+            BinaryPrimitives.WriteInt16LittleEndian(span[(offset + 3)..], (short)monitor.Y);
+            BinaryPrimitives.WriteUInt16LittleEndian(span[(offset + 5)..], (ushort)monitor.Width);
+            BinaryPrimitives.WriteUInt16LittleEndian(span[(offset + 7)..], (ushort)monitor.Height);
+            offset += 9;
+        }
+
+        await SendAsync(ssl, MsgType.ScreenInfo, payload, ct).ConfigureAwait(false);
+    }
+
+    private static bool SameLayout(DisplayMonitor[] current, DisplayMonitor[] fresh)
+    {
+        if (current.Length != fresh.Length) return false;
+
+        for (var i = 0; i < current.Length; i++)
+        {
+            if (current[i] != fresh[i]) return false;
+        }
+
+        return true;
     }
 
     private async Task InputLoopAsync(SslStream ssl, CancellationToken ct)
@@ -270,6 +367,10 @@ internal sealed class SessionServer
                     InputInjector.Key(
                         BinaryPrimitives.ReadUInt16LittleEndian(payload),
                         payload[2] != 0);
+                    break;
+
+                case MsgType.SelectMonitor when payload.Length >= 1:
+                    Volatile.Write(ref _requestedMonitor, payload[0] == 0xFF ? -1 : payload[0]);
                     break;
 
                 case MsgType.Ping:

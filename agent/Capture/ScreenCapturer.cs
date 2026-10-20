@@ -3,17 +3,12 @@ using System.Runtime.InteropServices;
 namespace SoporteLan.Agent.Capture;
 
 /// <summary>
-/// Captura GDI del escritorio virtual completo (todos los monitores) en un
-/// DIB de 32 bpp. Es la vía más ligera: sin Direct3D, sin WinRT y sin
-/// dependencias externas.
+/// Captura GDI de un rectángulo del escritorio (un monitor o todo el
+/// escritorio virtual) en un DIB de 32 bpp. Es la vía más ligera: sin
+/// Direct3D, sin WinRT y sin dependencias externas.
 /// </summary>
 internal sealed unsafe class ScreenCapturer : IDisposable
 {
-    private const int SmXVirtualScreen = 76;
-    private const int SmYVirtualScreen = 77;
-    private const int SmCxVirtualScreen = 78;
-    private const int SmCyVirtualScreen = 79;
-
     private const uint SrcCopy = 0x00CC0020;
     private const uint CaptureBlt = 0x40000000;
     private const uint DibRgbColors = 0;
@@ -26,6 +21,11 @@ internal sealed unsafe class ScreenCapturer : IDisposable
     private byte* _bits;
     private int _width;
     private int _height;
+
+    private int _regionX;
+    private int _regionY;
+    private int _regionWidth;
+    private int _regionHeight;
 
     public ScreenCapturer()
     {
@@ -46,27 +46,38 @@ internal sealed unsafe class ScreenCapturer : IDisposable
     public int OriginX { get; private set; }
     public int OriginY { get; private set; }
 
-    /// <summary>Detecta cambios de resolución o de configuración de monitores.</summary>
+    /// <summary>
+    /// Fija el rectángulo del escritorio que se va a capturar. Si cambia, el
+    /// siguiente <see cref="Refresh"/> recrea el búfer.
+    /// </summary>
+    public void SetRegion(int x, int y, int width, int height)
+    {
+        if (x == _regionX && y == _regionY && width == _regionWidth && height == _regionHeight)
+            return;
+
+        _regionX = x;
+        _regionY = y;
+        _regionWidth = width;
+        _regionHeight = height;
+        ReleaseDib();
+    }
+
+    /// <summary>Prepara (o reutiliza) el DIB para la región actual.</summary>
     public bool Refresh()
     {
-        var x = GetSystemMetrics(SmXVirtualScreen);
-        var y = GetSystemMetrics(SmYVirtualScreen);
-        var w = GetSystemMetrics(SmCxVirtualScreen);
-        var h = GetSystemMetrics(SmCyVirtualScreen);
-
-        if (w <= 0 || h <= 0) return false;
-        if (w == _width && h == _height && x == OriginX && y == OriginY && _dib != IntPtr.Zero)
+        if (_regionWidth <= 0 || _regionHeight <= 0) return false;
+        if (_regionWidth == _width && _regionHeight == _height && _dib != IntPtr.Zero)
             return true;
 
         ReleaseDib();
 
-        OriginX = x;
-        OriginY = y;
+        OriginX = _regionX;
+        OriginY = _regionY;
 
         var info = new BitmapInfo();
         info.Header.Size = (uint)sizeof(BitmapInfoHeader);
-        info.Header.Width = w;
-        info.Header.Height = -h; // negativo = top-down
+        info.Header.Width = _regionWidth;
+        info.Header.Height = -_regionHeight; // negativo = top-down
         info.Header.Planes = 1;
         info.Header.BitCount = 32;
         info.Header.Compression = 0;
@@ -76,12 +87,12 @@ internal sealed unsafe class ScreenCapturer : IDisposable
 
         _bits = (byte*)bits;
         _previousObject = SelectObject(_memoryDc, _dib);
-        _width = w;
-        _height = h;
+        _width = _regionWidth;
+        _height = _regionHeight;
         return true;
     }
 
-    /// <summary>Devuelve BGRA del escritorio virtual, o vacío si no se pudo capturar.</summary>
+    /// <summary>Devuelve BGRA de la región, o vacío si no se pudo capturar.</summary>
     public ReadOnlySpan<byte> Capture()
     {
         if (_dib == IntPtr.Zero || _bits == null) return default;
@@ -143,9 +154,6 @@ internal sealed unsafe class ScreenCapturer : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDc);
-
-    [DllImport("user32.dll")]
-    private static extern int GetSystemMetrics(int index);
 
     [DllImport("gdi32.dll", SetLastError = true)]
     private static extern IntPtr CreateCompatibleDC(IntPtr hDc);

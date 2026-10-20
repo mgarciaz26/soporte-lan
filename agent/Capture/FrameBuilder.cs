@@ -21,6 +21,14 @@ internal sealed class FrameBuilder
 
     public FrameBuilder(int tileSize) => _tile = tileSize;
 
+    /// <summary>Olvida el frame anterior: el siguiente envío será un keyframe completo.</summary>
+    public void Reset()
+    {
+        _previous = [];
+        _width = 0;
+        _height = 0;
+    }
+
     /// <summary>Devuelve el payload comprimido, o null si la pantalla no cambió.</summary>
     public MemoryStream? Build(ReadOnlySpan<byte> bgra, int width, int height)
     {

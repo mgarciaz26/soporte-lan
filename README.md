@@ -42,7 +42,7 @@ ni suscripción.
 | **Descubrimiento automático** | Los equipos aparecen solos en el visor (UDP broadcast). No hay que escribir IPs. |
 | **TLS con pinning** | Certificado autofirmado y huella SHA-256 fijada. Sin CA ni configuración. |
 | **PIN rotativo** | 6 dígitos, cambia cada 60 s y limita los intentos por IP. |
-| **Todos los monitores** | Captura el escritorio virtual completo, incluidos varios monitores. |
+| **Varias pantallas** | Detecta cuántos monitores hay y permite cambiar entre ellos o verlos todos. |
 | **Compresión sin pérdida** | Diff por tiles de 64×64 + zlib. El texto se ve perfecto, ideal para ERP. |
 | **Ratón y teclado** | Control remoto real con `SendInput`, más cursor dibujado en el visor. |
 | **Solo bandeja** | El agente no ocupa la barra de tareas ni abre consola. |
@@ -94,6 +94,10 @@ Elige el equipo de la lista (o escribe su IP y el puerto 50000), teclea el PIN
 que aparece en la pantalla del usuario y pulsa **Conectar**. El teclado y el
 ratón funcionan al hacer clic sobre la pantalla remota; **Pantalla completa**
 amplía la sesión.
+
+Si el equipo tiene varias pantallas, el visor muestra **cuántas hay** y un
+selector en la barra superior para cambiar entre ellas (o volver a verlas
+todas).
 
 ## Cómo funciona
 
@@ -189,8 +193,7 @@ Registro y datos:
 - Nada se escribe fuera de `%LOCALAPPDATA%\SoporteLAN`.
 
 Pendiente para la v2: diálogo de aceptación explícita por sesión, registro de
-sesiones en archivo, portapapeles, transferencia de archivos y selección de
-monitor.
+sesiones en archivo, portapapeles, transferencia de archivos y calidad ajustable.
 
 ## Estructura
 
@@ -257,11 +260,11 @@ node test-viewer.mjs 127.0.0.1 50000 123456
 
 - [x] Agente de bandeja con PIN rotativo y autostart
 - [x] TLS con pinning y límite de intentos
-- [x] Captura multi-monitor, ratón y teclado
+- [x] Captura multi-monitor con selección de pantalla, ratón y teclado
 - [x] Visor empaquetado con doble clic
 - [ ] Aceptación explícita por sesión
 - [ ] Transferencia de archivos y portapapeles
-- [ ] Selección de monitor y calidad ajustable
+- [ ] Calidad ajustable y vista simultánea de varios monitores
 - [ ] Registro de sesiones en archivo
 
 ## Licencia

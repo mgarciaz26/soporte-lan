@@ -43,6 +43,7 @@ ni suscripción.
 | **TLS con pinning** | Certificado autofirmado y huella SHA-256 fijada. Sin CA ni configuración. |
 | **PIN rotativo** | 6 dígitos, cambia cada 60 s y limita los intentos por IP. |
 | **Varias pantallas** | Detecta cuántos monitores hay y permite cambiar entre ellos o verlos todos. |
+| **Captura** | Guarda un PNG a resolución nativa con un clic (y lo copia al portapapeles). |
 | **Compresión sin pérdida** | Diff por tiles de 64×64 + zlib. El texto se ve perfecto, ideal para ERP. |
 | **Ratón y teclado** | Control remoto real con `SendInput`, más cursor dibujado en el visor. |
 | **Solo bandeja** | El agente no ocupa la barra de tareas ni abre consola. |
@@ -97,7 +98,8 @@ amplía la sesión.
 
 Si el equipo tiene varias pantallas, el visor muestra **cuántas hay** y un
 selector en la barra superior para cambiar entre ellas (o volver a verlas
-todas).
+todas). El botón **Captura** guarda un PNG de lo que se está viendo a
+resolución nativa y lo deja también en el portapapeles.
 
 ## Cómo funciona
 

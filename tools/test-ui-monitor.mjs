@@ -162,6 +162,45 @@ const first = await select('0');
 check('lienzo (pantalla 1)', first.canvas, sizeOf(initial.options[1]));
 check('valor (pantalla 1)', first.selected, '0');
 
+// Captura: se intercepta la descarga para comprobar el PNG sin escribir en disco.
+await evaluate(`(() => {
+  window.__capture = null;
+  const original = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    if (this.download) {
+      window.__capture = { name: this.download, href: this.href };
+      return;
+    }
+    return original.call(this);
+  };
+  return 'ok';
+})()`);
+
+await evaluate(`(() => { document.getElementById('capture').click(); return 'ok'; })()`);
+await sleep(1500);
+
+const capture = await evaluate(`(async () => {
+  if (!window.__capture) return null;
+  const response = await fetch(window.__capture.href);
+  const blob = await response.blob();
+  const bitmap = await createImageBitmap(blob);
+  return {
+    name: window.__capture.name,
+    type: blob.type,
+    bytes: blob.size,
+    size: [bitmap.width, bitmap.height],
+  };
+})()`);
+
+console.log('Captura:', JSON.stringify(capture));
+check('captura generada', capture !== null, true);
+check('tipo de captura', capture?.type, 'image/png');
+check('tamaño de captura', capture?.size, first.canvas);
+check('nombre .png', /^captura-.*\.png$/.test(capture?.name ?? ''), true);
+
+const afterCapture = await snapshot();
+check('aviso en el registro', afterCapture.log.includes('Captura guardada'), true);
+
 const shot = await send('Page.captureScreenshot', { format: 'png' });
 mkdirSync(dirname(shotPath), { recursive: true });
 writeFileSync(shotPath, Buffer.from(shot.data, 'base64'));

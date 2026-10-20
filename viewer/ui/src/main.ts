@@ -40,6 +40,7 @@ const cursorElement = element<HTMLDivElement>('cursor');
 const toolbar = element<HTMLDivElement>('toolbar');
 const sessionLabel = element<HTMLSpanElement>('session-label');
 const monitorSelect = element<HTMLSelectElement>('monitor');
+const captureButton = element<HTMLButtonElement>('capture');
 const disconnectButton = element<HTMLButtonElement>('disconnect');
 const fullscreenButton = element<HTMLButtonElement>('fullscreen');
 
@@ -523,6 +524,49 @@ window.addEventListener('blur', releaseKeys);
 // Interfaz
 // ---------------------------------------------------------------------------
 
+async function saveCapture(): Promise<void> {
+  if (!ready || canvas.width === 0 || canvas.height === 0) {
+    log('Todavía no hay ninguna pantalla que capturar.', 'error');
+    return;
+  }
+
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) {
+    log('No se pudo generar la captura.', 'error');
+    return;
+  }
+
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const now = new Date();
+  const stamp =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-` +
+    `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const name = `captura-${currentIp.replace(/[^\w.-]+/g, '_')}-${stamp}.png`;
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+
+  let copied = false;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    copied = true;
+  } catch {
+    // El portapapeles puede no estar disponible; la descarga ya se hizo.
+  }
+
+  log(
+    `Captura guardada: ${name} (${canvas.width}×${canvas.height})` +
+      (copied ? ' y copiada al portapapeles.' : '.'),
+    'ok',
+  );
+}
+
 function connect(): void {
   const ip = ipInput.value.trim();
   const port = Number(portInput.value) || 50000;
@@ -579,6 +623,8 @@ fullscreenButton.addEventListener('click', () => {
   if (document.fullscreenElement) void document.exitFullscreen();
   else void stage.requestFullscreen();
 });
+
+captureButton.addEventListener('click', () => void saveCapture());
 
 monitorSelect.addEventListener('change', () => {
   const value = Number(monitorSelect.value);
